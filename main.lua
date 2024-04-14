@@ -146,6 +146,7 @@ local deckImages = graphics.newImageSheet("assets/deck_sheet.png", deckFrames)
 local deck --assigned when deck is created
 
 local castle = display.newImageRect("assets/castle.png", 30, 30)
+castle.hp = 1000
 castle.x, castle.y = display.actualContentWidth / 2, display.actualContentHeight / 3
 
 local waveTimerText = display.newText({
@@ -317,6 +318,34 @@ local function moveUnit(unit, target) --called from units on tick function
 	unit.y = unit.y + unitVector.y * deltaTime * unit.moveSpeed * 10
 end
 
+local function getDistance(unit, target) --called from units on tick function
+	local targetVector = { x = target.x - unit.x, y = target.y - unit.y }
+	local mag = math.abs(math.sqrt(math.pow(targetVector.x, 2) + math.pow(targetVector.y, 2)))
+	return mag
+end
+
+local function doAttack(unit, target) --called from units on tick function
+	target.hp = target.hp - unit.attack
+	unit.timeSinceAttack = 0
+	transition.moveTo(unit, { x = target.x, y = target.y, transition = easing.continuousLoop, time = 200 })
+	print("dealing " .. unit.attack .. " damage, new hp:" .. target.hp)
+end
+
+local function findTarget(unit, targetList)
+	local shortestMag = 9999
+	local closestTarget = nil
+	for i = 1, #targetList do
+		local target = targetList[i]
+		local targetVector = { x = target.x - unit.x, y = target.y - unit.y }
+		local mag = math.abs(math.sqrt(math.pow(targetVector.x, 2) + math.pow(targetVector.y, 2)))
+		if mag < shortestMag then
+			shortestMag = mag
+			closestTarget = target
+		end
+	end
+	return closestTarget
+end
+
 local function createCharacter(rank, suit, x, y)
 	local char = display.newGroup()
 	char:scale(charScale, charScale);
@@ -324,6 +353,9 @@ local function createCharacter(rank, suit, x, y)
 	char.y = y
 	char.rank = rank
 	char.suit = suit
+	char.attackRange = 10
+	char.attackRate = 1
+	char.timeSinceAttack = 0
 	for k, v in pairs(unitData[rank]) do
 		print(k, v)
 		char[k] = v
@@ -370,15 +402,35 @@ local function createCharacter(rank, suit, x, y)
 	char.image.height = frameHeight
 	char.image.fill = paint
 	char.tick = function(self)
-
+		if self.target then
+			if getDistance(self, self.target) < self.attackRange then
+				if self.timeSinceAttack > self.attackRate then
+					doAttack(self, self.target)
+				end
+			else --do not move if within attack range of target
+				moveUnit(self, self.target)
+			end
+		else
+			local nearestTarget = findTarget(self, enemies)
+			if nearestTarget then
+				self.target = nearestTarget
+			end
+		end
 	end
+	characters[#characters + 1] = char
 end
 
 local function createEnemy(level, suit, x, y)
 	local enemy = display.newGroup()
+	enemy.suit = suit
 	enemy.x, enemy.y = x, y
 	enemy.target = castle
-	enemy.moveSpeed = 1
+	enemy.moveSpeed = 5
+	enemy.attackRange = 10
+	enemy.attackRate = 1
+	enemy.attack = 10
+	enemy.timeSinceAttack = 0
+	enemy.hp = 15
 
 	local paint = {
 		type = "image",
@@ -388,15 +440,31 @@ local function createEnemy(level, suit, x, y)
 	enemy.image = display.newRect(enemy, 0, 0, 10, 10)
 	enemy.image.fill = paint
 	enemy.tick = function(self)
-		moveUnit(self, self.target)
+		self.timeSinceAttack = self.timeSinceAttack + deltaTime
+		if self.target then
+			if getDistance(self, self.target) < self.attackRange then
+				if self.timeSinceAttack > self.attackRate then
+					doAttack(self, self.target)
+				end
+			else
+				moveUnit(self, self.target)
+				local distanceToCastle = getDistance(self, castle)
+				local nearestTarget = findTarget(self, characters)
+				if nearestTarget then
+					if getDistance(self, nearestTarget) < distanceToCastle then
+						self.target = nearestTarget
+					end
+				end
+			end
+		end
 	end
 	enemies[#enemies + 1] = enemy
 end
 
-local function spawnWave()
-	for i = 1, 10 do
-		local side = math.random(1, 4)
-		local suit = math.random(1, 4)
+local function spawnWave(enemyCount, side, suit)
+	for i = 1, enemyCount do
+		if side == nil then side = math.random(1, 4) end
+		if suit == nil then suit = math.random(1, 4) end
 		local offset = math.random(display.contentCenterX - largestResolution / 2,
 			display.contentCenterX + largestResolution / 2)
 		if side == 1 then
@@ -408,6 +476,7 @@ local function spawnWave()
 		elseif side == 4 then
 			createEnemy(1, suit, castle.x - largestResolution / 2, offset)
 		end
+		suit, side = nil, nil
 	end
 end
 
@@ -446,13 +515,16 @@ local function onFrame(event)
 		waveTimerText.text = "next wave: " .. waveTimer
 		if waveTimer < 1 then
 			currentWave = currentWave + 1
-			spawnWave()
+			spawnWave(currentWave + 4)
 			currentWaveText.text = "current wave: " .. currentWave
 			displayMessage("wave " .. currentWave, 3000)
 		end
 	end
 	for i = 1, #enemies do
 		enemies[i]:tick()
+	end
+	for i = 1, #characters do
+		characters[i]:tick()
 	end
 end
 -- Add the mouse event listener.
