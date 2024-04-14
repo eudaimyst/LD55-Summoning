@@ -8,3 +8,4 @@
 
 -made character sprites and got them to spawn on click for testing
 -drawing and placing of cards
+-designed unitData
