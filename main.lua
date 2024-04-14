@@ -40,7 +40,11 @@ local cardTypes = {
 		frame = 1
 	}
 }
+local suitBonuses = {
+	[1] = 3, [2] = 4, [3] = 2, [4] = 1
+}
 --game variables
+local gameOver = false
 local largestScreenSide = "y"
 local largestResolution = display.actualContentHeight
 if display.actualContentWidth > display.actualContentHeight then
@@ -147,7 +151,8 @@ local deck --assigned when deck is created
 
 local castle = display.newImageRect("assets/castle.png", 30, 30)
 castle.hp = 1000
-castle.x, castle.y = display.actualContentWidth / 2, display.actualContentHeight / 3
+castle.dead = false
+castle.x, castle.y = display.actualContentWidth / 2, display.actualContentHeight / 2
 
 local waveTimerText = display.newText({
 	text = "next wave: 0",
@@ -171,7 +176,7 @@ local currentWaveText = display.newText({
 
 
 local function displayMessage(text, ms)
-	local messageText = display.newText(text, display.actualContentWidth / 2, 20, native.systemFont, 14)
+	local messageText = display.newText(text, display.contentCenterX, display.contentCenterY, native.systemFont, 14)
 	timer.performWithDelay(ms, function() messageText:removeSelf() end);
 end
 
@@ -244,37 +249,12 @@ local function displayHandCard(slot)
 	end
 end
 
-local function displayCardSlots()
-	for i = 1, 3 do
-		cardSlots[i] = display.newImageRect("assets/empty_slot.png", 50, 80)
-		cardSlots[i].x = 50 + (60 * i)
-		cardSlots[i].y = display.actualContentHeight - 120
-		cardSlots[i].slotNumber = i
-		cardSlots[i].tap = function(self, event)
-			if mouseMode == "pick" then
-				if handCards[i] ~= nil then
-					slotToPlace = i
-					mouseMode = "place"
-				end
-			end
-		end
-		cardSlots[i]:addEventListener("tap", cardSlots[i])
-	end
-	cardSlots.update = function(self)
-		print("refreshing hand")
-		for i = 1, 3 do
-			displayHandCard(i)
-		end
-	end
-end
-displayCardSlots()
-
-local function drawCard() --when deck is tapped
-	if deck == nil then
-		print("unable to draw card with no deck")
-		return
-	else
-		if mouseMode == "pick" then
+local function drawCard(event) --when deck is tapped
+	if (event.phase == "began") then
+		if deck == nil then
+			print("unable to draw card with no deck")
+			return
+		else
 			local cardDrawn = false
 			for i = 1, 3 do
 				if handCards[i] == nil then
@@ -291,22 +271,22 @@ local function drawCard() --when deck is tapped
 				print("unable to draw card, hand is full")
 			end
 		end
+		deck.count:update()
+		cardSlots:update()
 	end
-	deck.count:update()
-	cardSlots:update()
 end
 
 local function displayDeck()
 	deck = display.newImageRect(deckImages, 1, 50, 80)
 	deck.x = 35
-	deck.y = display.actualContentHeight - 120
+	deck.y = display.actualContentHeight - 90
 	deck.count = display.newText(#deckOrder, 100, 200, native.systemFont, 16)
 	deck.count.y = deck.y + 50
 	deck.count.x = deck.x
 	deck.count.update = function(self)
 		self.text = #deckOrder
 	end
-	deck:addEventListener("tap", drawCard)
+	deck:addEventListener("touch", drawCard)
 end
 displayDeck()
 
@@ -324,11 +304,30 @@ local function getDistance(unit, target) --called from units on tick function
 	return mag
 end
 
+local function killUnit(unit)
+	unit.alpha = 0
+	unit.dead = true
+end
+
 local function doAttack(unit, target) --called from units on tick function
-	target.hp = target.hp - unit.attack
 	unit.timeSinceAttack = 0
-	transition.moveTo(unit, { x = target.x, y = target.y, transition = easing.continuousLoop, time = 200 })
-	print("dealing " .. unit.attack .. " damage, new hp:" .. target.hp)
+	local function dealDamage()
+		local bonusSuitDamage = 0
+		if target.suit == suitBonuses[unit.suit] then bonusSuitDamage = unit.attack * .2 end
+		target.hp = target.hp - (unit.attack + bonusSuitDamage)
+		if target.hp <= 0 then
+			killUnit(target)
+		end
+		print("dealing " .. unit.attack .. " damage, new hp:" .. target.hp .. ", bonus: " .. bonusSuitDamage)
+	end
+	transition.moveTo(unit,
+		{
+			x = target.x,
+			y = target.y,
+			transition = easing.continuousLoop,
+			onComplete = dealDamage,
+			time = 200 * unit.attackSpeed
+		})
 end
 
 local function findTarget(unit, targetList)
@@ -338,7 +337,7 @@ local function findTarget(unit, targetList)
 		local target = targetList[i]
 		local targetVector = { x = target.x - unit.x, y = target.y - unit.y }
 		local mag = math.abs(math.sqrt(math.pow(targetVector.x, 2) + math.pow(targetVector.y, 2)))
-		if mag < shortestMag then
+		if mag < shortestMag and target.dead == false then
 			shortestMag = mag
 			closestTarget = target
 		end
@@ -353,9 +352,10 @@ local function createCharacter(rank, suit, x, y)
 	char.y = y
 	char.rank = rank
 	char.suit = suit
-	char.attackRange = 10
+	char.attackRange = 9
 	char.attackRate = 1
 	char.timeSinceAttack = 0
+	char.dead = false
 	for k, v in pairs(unitData[rank]) do
 		print(k, v)
 		char[k] = v
@@ -402,7 +402,11 @@ local function createCharacter(rank, suit, x, y)
 	char.image.height = frameHeight
 	char.image.fill = paint
 	char.tick = function(self)
-		if self.target then
+		if self.dead == true then
+			return
+		end
+		self.timeSinceAttack = self.timeSinceAttack + deltaTime
+		if self.target and self.target.dead == false then
 			if getDistance(self, self.target) < self.attackRange then
 				if self.timeSinceAttack > self.attackRate then
 					doAttack(self, self.target)
@@ -420,17 +424,72 @@ local function createCharacter(rank, suit, x, y)
 	characters[#characters + 1] = char
 end
 
+local function displayCardSlots()
+	for i = 1, 3 do
+		cardSlots[i] = display.newImageRect("assets/empty_slot.png", 50, 80)
+		cardSlots[i].x = 50 + (60 * i)
+		cardSlots[i].y = display.actualContentHeight - 90
+		cardSlots[i].slotNumber = i
+		cardSlots[i].touch = function(self, event)
+			if self.card == nil then
+				return
+			end
+			if event.phase == "began" then
+				if handCards[i] ~= nil then
+					slotToPlace = i
+					self.alpha = .01 --hacky dumbness
+					self:scale(4, 4) --hacky dumbness
+					self.card:scale(.5, .5)
+				end
+			end
+			if event.phase == "moved" then
+				self.x = event.x --hacky dumbness
+				self.y = event.y --hacky dumbness
+				self.card.x = event.x
+				self.card.y = event.y
+			end
+			if event.phase == "ended" then
+				self.x = 50 + (60 * i)
+				self.y = display.actualContentHeight - 90
+				self.alpha = 1
+				self:scale(.25, .25)
+				--^^reverts the hackiness
+				if slotToPlace then
+					local card = handCards[slotToPlace]
+					print("placing: " .. slotToPlace)
+					print(json.prettify(handCards))
+					createCharacter(card.rank, card.suit, event.x, event.y)
+					handCards[slotToPlace] = nil
+					cardSlots:update()
+					cardSlots[slotToPlace].card = nil
+					slotToPlace = nil
+				end
+			end
+		end
+		cardSlots[i]:addEventListener("touch", cardSlots[i])
+	end
+	cardSlots.update = function(self)
+		print("refreshing hand")
+		for i = 1, 3 do
+			displayHandCard(i)
+		end
+	end
+end
+displayCardSlots()
+
 local function createEnemy(level, suit, x, y)
 	local enemy = display.newGroup()
 	enemy.suit = suit
 	enemy.x, enemy.y = x, y
 	enemy.target = castle
-	enemy.moveSpeed = 5
+	enemy.moveSpeed = 1
+	enemy.attackSpeed = .8
 	enemy.attackRange = 10
 	enemy.attackRate = 1
 	enemy.attack = 10
 	enemy.timeSinceAttack = 0
 	enemy.hp = 15
+	enemy.dead = false
 
 	local paint = {
 		type = "image",
@@ -440,71 +499,76 @@ local function createEnemy(level, suit, x, y)
 	enemy.image = display.newRect(enemy, 0, 0, 10, 10)
 	enemy.image.fill = paint
 	enemy.tick = function(self)
+		if self.dead == true then
+			return
+		end
 		self.timeSinceAttack = self.timeSinceAttack + deltaTime
 		if self.target then
-			if getDistance(self, self.target) < self.attackRange then
-				if self.timeSinceAttack > self.attackRate then
-					doAttack(self, self.target)
-				end
-			else
-				moveUnit(self, self.target)
-				local distanceToCastle = getDistance(self, castle)
-				local nearestTarget = findTarget(self, characters)
-				if nearestTarget then
-					if getDistance(self, nearestTarget) < distanceToCastle then
-						self.target = nearestTarget
+			if self.target.dead == false then
+				if getDistance(self, self.target) < self.attackRange then
+					if self.timeSinceAttack > self.attackRate then
+						doAttack(self, self.target)
 					end
+				else
+					moveUnit(self, self.target)
 				end
 			end
+		end
+		local distanceToCastle = getDistance(self, castle)
+		local nearestTarget = findTarget(self, characters)
+		if nearestTarget then
+			if getDistance(self, nearestTarget) < distanceToCastle then
+				self.target = nearestTarget
+			else
+				self.target = castle
+			end
+		else
+			self.target = castle
 		end
 	end
 	enemies[#enemies + 1] = enemy
 end
 
 local function spawnWave(enemyCount, side, suit)
+	print("new wave: " .. enemyCount, side, suit)
+	local randomSide, randomSuit = false, false
+	if side == nil then
+		randomSide = true
+	end
+	if suit == nil then
+		randomSuit = true
+	end
 	for i = 1, enemyCount do
-		if side == nil then side = math.random(1, 4) end
-		if suit == nil then suit = math.random(1, 4) end
-		local offset = math.random(display.contentCenterX - largestResolution / 2,
+		if randomSide then
+			side = math.random(1, 4); print("random side")
+		end
+		if randomSuit then
+			suit = math.random(1, 4); print("random suit")
+		end
+		local offsetX = math.random(display.contentCenterX - largestResolution / 2,
 			display.contentCenterX + largestResolution / 2)
+		local offsetY = math.random(display.contentCenterY - largestResolution / 2,
+			display.contentCenterY + largestResolution / 2)
 		if side == 1 then
-			createEnemy(1, suit, offset, castle.y + largestResolution / 2)
+			createEnemy(1, suit, offsetX, castle.y + largestResolution / 2) --south
 		elseif side == 2 then
-			createEnemy(1, suit, offset, castle.y + -largestResolution / 2)
+			createEnemy(1, suit, offsetX, castle.y + -largestResolution / 2) --north
 		elseif side == 3 then
-			createEnemy(1, suit, castle.x + largestResolution / 2, offset)
+			createEnemy(1, suit, castle.x + largestResolution / 2, offsetY) --east
 		elseif side == 4 then
-			createEnemy(1, suit, castle.x - largestResolution / 2, offset)
-		end
-		suit, side = nil, nil
-	end
-end
-
-local function mouseClick(x, y)
-	if mouseMode == "place" then
-		if slotToPlace then --else out of cards in the deck order
-			local card = handCards[slotToPlace]
-			print("placing: " .. slotToPlace)
-			print(json.prettify(handCards))
-			createCharacter(card.rank, card.suit, x, y)
-			handCards[slotToPlace] = nil
-			cardSlots:update()
-			mouseMode = "pick"
-			cardSlots[slotToPlace].card = nil
-			slotToPlace = nil
-		end
-	end
-end
-
-local function onMouseEvent(event)
-	if event.type == "down" then
-		if event.isPrimaryButtonDown then
-			mouseClick(event.x, event.y)
+			createEnemy(1, suit, castle.x - largestResolution / 2, offsetY) --west
 		end
 	end
 end
 
 local function onFrame(event)
+	if gameOver then
+		return
+	end
+	if castle.hp <= 0 then
+		displayMessage("You have failed to save the castle", 999999999)
+		gameOver = true
+	end
 	local oldGameTimer = gameTimer
 	deltaTime = (system.getTimer() - oldSystemTime) / 1000
 	oldSystemTime = system.getTimer()
@@ -515,9 +579,26 @@ local function onFrame(event)
 		waveTimerText.text = "next wave: " .. waveTimer
 		if waveTimer < 1 then
 			currentWave = currentWave + 1
-			spawnWave(currentWave + 4)
+			if currentWave == 5 then
+				spawnWave(currentWave + 4, 2, 1)
+				displayMessage("wave 5: hearts from the North", 3000)
+			elseif currentWave == 10 then
+				spawnWave(currentWave + 4, 4, 2)
+				displayMessage("wave 10: diamonds from the West", 3000)
+			elseif currentWave == 15 then
+				displayMessage("wave 15: clubs from the East", 3000)
+				spawnWave(currentWave + 4, 3, 4)
+			elseif currentWave == 20 then
+				spawnWave(currentWave + 4, 1, 3)
+				displayMessage("final wave: spades from the South", 3000)
+			elseif currentWave == 21 then
+				displayMessage("Congratulations! You saved the castle", 10000)
+			elseif currentWave > 21 then
+			else
+				spawnWave(currentWave + 4)
+				displayMessage("wave " .. currentWave, 3000)
+			end
 			currentWaveText.text = "current wave: " .. currentWave
-			displayMessage("wave " .. currentWave, 3000)
 		end
 	end
 	for i = 1, #enemies do
@@ -528,5 +609,4 @@ local function onFrame(event)
 	end
 end
 -- Add the mouse event listener.
-Runtime:addEventListener("mouse", onMouseEvent)
 Runtime:addEventListener("enterFrame", onFrame)
