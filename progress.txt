@@ -13,4 +13,6 @@
 -need enemies to do movement and attacks, need waves to do enemies
 -enemies and characters all moving and attacking
 -changed cards from clicks to drag and drops
--game is working, though less than finished, needs face card abilities, hp bars not working, bonus dmg for hand size
+-game is working, though less than finished, needs face card abilities, hp bars not working, bonus hp for hand size
+-managed to complete those 3 minus the jacks movement
+-added score counting and final wave competion checking

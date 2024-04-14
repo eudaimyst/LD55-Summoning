@@ -1,4 +1,5 @@
 display.setDefault("magTextureFilter", "nearest");
+display.setDefault("minTextureFilter", "nearest");
 display.setDefault("background", 0, .25, .05)
 local json = require "json"
 
@@ -8,18 +9,18 @@ local charScale = .5;
 local waveSpawnTimer = 20; --seconds for how often waves spawn
 local waveCount = 20
 local unitData = {
-	[1] = { attack = 20, hp = 80, attackSpeed = 0.5, moveSpeed = 1.2 },
-	[2] = { attack = 10, hp = 40, attackSpeed = 1, moveSpeed = 0.92 },
-	[3] = { attack = 11, hp = 40, attackSpeed = 1, moveSpeed = 0.93 },
-	[4] = { attack = 12, hp = 40, attackSpeed = 1, moveSpeed = 0.94 },
+	[1] = { attack = 20, hp = 80, attackSpeed = 0.5, moveSpeed = 2 },
+	[2] = { attack = 10, hp = 40, attackSpeed = 1, moveSpeed = 0.8 },
+	[3] = { attack = 11, hp = 40, attackSpeed = 1, moveSpeed = 0.85 },
+	[4] = { attack = 12, hp = 40, attackSpeed = 1, moveSpeed = 0.9 },
 	[5] = { attack = 13, hp = 40, attackSpeed = 1, moveSpeed = 0.95 },
-	[6] = { attack = 14, hp = 40, attackSpeed = 1, moveSpeed = 0.96 },
-	[7] = { attack = 15, hp = 40, attackSpeed = 1, moveSpeed = 0.97 },
-	[8] = { attack = 16, hp = 40, attackSpeed = 1, moveSpeed = 0.98 },
-	[9] = { attack = 17, hp = 40, attackSpeed = 1, moveSpeed = 0.99 },
-	[10] = { attack = 18, hp = 40, attackSpeed = 1, moveSpeed = 1 },
-	[11] = { attack = 20, hp = 60, attackSpeed = 1, moveSpeed = 1.4 },
-	[12] = { attack = 10, hp = 40, attackSpeed = 1, moveSpeed = 0.9 },
+	[6] = { attack = 14, hp = 40, attackSpeed = 1, moveSpeed = 1 },
+	[7] = { attack = 15, hp = 40, attackSpeed = 1, moveSpeed = 1.05 },
+	[8] = { attack = 16, hp = 40, attackSpeed = 1, moveSpeed = 1.10 },
+	[9] = { attack = 17, hp = 40, attackSpeed = 1, moveSpeed = 1.15 },
+	[10] = { attack = 18, hp = 40, attackSpeed = 1, moveSpeed = 1.2 },
+	[11] = { attack = 30, hp = 60, attackSpeed = 1.5, moveSpeed = 1.5 },
+	[12] = { attack = 5, hp = 40, attackSpeed = 1, moveSpeed = 0.9 },
 	[13] = { attack = 0, hp = 100, attackSpeed = 0, moveSpeed = 0.3 }
 }
 local cardTypes = {
@@ -45,17 +46,15 @@ local suitBonuses = {
 }
 --game variables
 local gameOver = false
-local largestScreenSide = "y"
+local gameTimerOffset = 0
 local largestResolution = display.actualContentHeight
 if display.actualContentWidth > display.actualContentHeight then
-	largestScreenSide = "x"
 	largestResolution = display.actualContentWidth
 end
 
 local characters = {}
 local enemies = {}
 
-local mouseMode = "pick"
 local currentWave = 0
 local gameTimer = 0
 local waveTimer = 0
@@ -63,7 +62,6 @@ local waveTimer = 0
 local oldSystemTime = 0 --used to calculate deltaTime
 local deltaTime = 0
 
-local waveData = {}
 local function generateWaveData()
 
 end
@@ -122,6 +120,8 @@ local cardValues = { [1] = "A", [11] = "J", [12] = "Q", [13] = "K" }
 for i = 2, 10 do
 	cardValues[i] = tostring(i);
 end
+local bonusDisplay --displays text to right of card slots
+local cardCount    --how many cards are in hand
 
 local cards = {}
 local deckOrder = {}
@@ -150,9 +150,18 @@ local deckImages = graphics.newImageSheet("assets/deck_sheet.png", deckFrames)
 local deck --assigned when deck is created
 
 local castle = display.newImageRect("assets/castle.png", 30, 30)
+castle.maxHP = 1000
 castle.hp = 1000
 castle.dead = false
 castle.x, castle.y = display.actualContentWidth / 2, display.actualContentHeight / 2
+castle.hpBG = display.newRect(castle.x, castle.y + castle.height / 2 + 2, castle.width, 3)
+castle.hpBG:setFillColor(0, .15, 0)
+castle.hpBar = display.newRect(castle.x, castle.y + castle.height / 2 + 2, castle.width, 3)
+castle.hpBar:setFillColor(0, 1, 0)
+castle.hpBar.update = function(self)
+	castle.hpBar.xScale = castle.hp / castle.maxHP
+	castle.hpBar.x = castle.x + (-castle.width / 2) * (1 - castle.hpBar.xScale)
+end
 
 local waveTimerText = display.newText({
 	text = "next wave: 0",
@@ -172,7 +181,6 @@ local currentWaveText = display.newText({
 	fontSize = 10,
 	align = "left" -- Alignment parameter
 })
-
 
 
 local function displayMessage(text, ms)
@@ -279,9 +287,9 @@ end
 local function displayDeck()
 	deck = display.newImageRect(deckImages, 1, 50, 80)
 	deck.x = 35
-	deck.y = display.actualContentHeight - 90
+	deck.y = display.actualContentHeight - 50
 	deck.count = display.newText(#deckOrder, 100, 200, native.systemFont, 16)
-	deck.count.y = deck.y + 50
+	deck.count.y = deck.y - 50
 	deck.count.x = deck.x
 	deck.count.update = function(self)
 		self.text = #deckOrder
@@ -304,17 +312,60 @@ local function getDistance(unit, target) --called from units on tick function
 	return mag
 end
 
+local function KingAuraCheck(unit)
+	print("king aura working")
+	for i = 1, #characters do
+		local char = characters[i]
+		if getDistance(unit, char) < 100 then
+			char.hasKingAura = true
+		else
+			char.hasKingAura = false
+		end
+	end
+end
+
+
 local function killUnit(unit)
 	unit.alpha = 0
 	unit.dead = true
 end
 
+local function QueenAuraCheck(unit)
+	print("queen aura working")
+	local function queenAuraDMG(enemy)
+		local bonusSuitDamage = 0
+		if enemy.suit == suitBonuses[unit.suit] then bonusSuitDamage = unit.attack * .2 end
+		enemy.hp = enemy.hp - (unit.attack + bonusSuitDamage)
+		if enemy.hpBar then
+			enemy.hpBar:update()
+		end
+		if enemy.hp <= 0 then
+			killUnit(enemy)
+		end
+		print("dealing " .. unit.attack .. " QUEEN AURA damage, new hp:" .. enemy.hp .. ", bonus: " .. bonusSuitDamage)
+	end
+	for i = 1, #enemies do
+		local enemy = enemies[i]
+		if getDistance(unit, enemy) < 50 then
+			if enemy.dead == false then
+				queenAuraDMG(enemy)
+			end
+		end
+	end
+end
+
 local function doAttack(unit, target) --called from units on tick function
 	unit.timeSinceAttack = 0
 	local function dealDamage()
+		if unit.dead then return end --deal no damage if already killed
 		local bonusSuitDamage = 0
+		local damageReduction = 0
 		if target.suit == suitBonuses[unit.suit] then bonusSuitDamage = unit.attack * .2 end
-		target.hp = target.hp - (unit.attack + bonusSuitDamage)
+		if target.hasKingAura then damageReduction = unit.attack * .5 end
+		target.hp = target.hp - (unit.attack + bonusSuitDamage - damageReduction)
+		if target.hpBar then
+			target.hpBar:update()
+		end
 		if target.hp <= 0 then
 			killUnit(target)
 		end
@@ -356,12 +407,21 @@ local function createCharacter(rank, suit, x, y)
 	char.attackRate = 1
 	char.timeSinceAttack = 0
 	char.dead = false
+	if (rank == 12 or rank == 13) then --queen
+		char.attackRange = 50
+	end
+	if (rank == 11) then --jack
+		char.attackRange = 20
+	end
 	for k, v in pairs(unitData[rank]) do
 		print(k, v)
 		char[k] = v
 	end
+	char.hp = char.hp + (char.hp * (3 - cardCount) * .1)
 	char.maxHP = char.hp
 	print(char.maxHP, char.hp)
+
+
 	if rank == 1 then
 		char.cardType = cardTypes.ace
 	elseif rank == 11 then
@@ -401,15 +461,36 @@ local function createCharacter(rank, suit, x, y)
 	char.image.width = frameWidth
 	char.image.height = frameHeight
 	char.image.fill = paint
+
+	if (rank == 12) then --queen
+		char.aura = display.newCircle(char, 0, 0, 100);
+		char.aura:setFillColor(0, 0, 1, .2)
+	end
+	if (rank == 13) then --king
+		char.aura = display.newCircle(char, 0, 0, 100);
+		char.aura:setFillColor(0, 1, 1, .2)
+	end
+
+
+
 	char.tick = function(self)
 		if self.dead == true then
 			return
 		end
 		self.timeSinceAttack = self.timeSinceAttack + deltaTime
+		if (rank == 13 and self.timeSinceAttack > self.attackRate) then --king
+			self.timeSinceAttack = 0
+			KingAuraCheck(self)
+		end
 		if self.target and self.target.dead == false then
 			if getDistance(self, self.target) < self.attackRange then
 				if self.timeSinceAttack > self.attackRate then
-					doAttack(self, self.target)
+					if (rank == 12) then --queen
+						self.timeSinceAttack = 0
+						QueenAuraCheck(self)
+					else
+						doAttack(self, self.target)
+					end
 				end
 			else --do not move if within attack range of target
 				moveUnit(self, self.target)
@@ -428,7 +509,7 @@ local function displayCardSlots()
 	for i = 1, 3 do
 		cardSlots[i] = display.newImageRect("assets/empty_slot.png", 50, 80)
 		cardSlots[i].x = 50 + (60 * i)
-		cardSlots[i].y = display.actualContentHeight - 90
+		cardSlots[i].y = display.actualContentHeight - 50
 		cardSlots[i].slotNumber = i
 		cardSlots[i].touch = function(self, event)
 			if self.card == nil then
@@ -443,6 +524,9 @@ local function displayCardSlots()
 				end
 			end
 			if event.phase == "moved" then
+				if self ~= cardSlots[slotToPlace] then --ignore move events that are not from the placed card
+					return
+				end
 				self.x = event.x --hacky dumbness
 				self.y = event.y --hacky dumbness
 				self.card.x = event.x
@@ -450,7 +534,7 @@ local function displayCardSlots()
 			end
 			if event.phase == "ended" then
 				self.x = 50 + (60 * i)
-				self.y = display.actualContentHeight - 90
+				self.y = display.actualContentHeight - 50
 				self.alpha = 1
 				self:scale(.25, .25)
 				--^^reverts the hackiness
@@ -467,6 +551,24 @@ local function displayCardSlots()
 			end
 		end
 		cardSlots[i]:addEventListener("touch", cardSlots[i])
+	end
+	bonusDisplay = display.newText({
+		text = "bonus: 20%",
+		x = cardSlots[3].x + 80,
+		y = cardSlots[3].y,
+		width = 100,
+		font = native.systemFont,
+		fontSize = 8,
+		align = "left" -- Alignment parameter
+	})
+	bonusDisplay.update = function(self)
+		cardCount = 0
+		for i = 1, 3 do
+			if handCards[i] ~= nil then
+				cardCount = cardCount + 1
+			end
+		end
+		self.text = "bonus: " .. tostring((3 - cardCount) * 10) .. "%"
 	end
 	cardSlots.update = function(self)
 		print("refreshing hand")
@@ -488,7 +590,8 @@ local function createEnemy(level, suit, x, y)
 	enemy.attackRate = 1
 	enemy.attack = 10
 	enemy.timeSinceAttack = 0
-	enemy.hp = 15
+	enemy.maxHP = 25
+	enemy.hp = enemy.maxHP
 	enemy.dead = false
 
 	local paint = {
@@ -498,6 +601,15 @@ local function createEnemy(level, suit, x, y)
 	}
 	enemy.image = display.newRect(enemy, 0, 0, 10, 10)
 	enemy.image.fill = paint
+	enemy.hpBG = display.newRect(enemy, 0, enemy.image.height / 2 + 2, enemy.image.width, 2)
+	enemy.hpBG:setFillColor(.15, 0, 0)
+	enemy.hpBar = display.newRect(enemy, 0, enemy.image.height / 2 + 2, enemy.image.width, 2)
+	enemy.hpBar:setFillColor(1, 0, 0)
+	enemy.hpBar.update = function(self)
+		enemy.hpBar.xScale = enemy.hp / enemy.maxHP
+		enemy.hpBar.x = (-enemy.image.width / 2) * (1 - enemy.hpBar.xScale)
+	end
+
 	enemy.tick = function(self)
 		if self.dead == true then
 			return
@@ -561,18 +673,44 @@ local function spawnWave(enemyCount, side, suit)
 	end
 end
 
+local function calculateScore()
+	local waveScore = currentWave * 1000
+	local enemiesKilled = 0
+	for i = 1, #enemies do
+		if enemies[i].dead then
+			enemiesKilled = enemiesKilled + 1
+		end
+	end
+	local enemyScore = enemiesKilled * 100
+	local timeSavedScore = gameTimerOffset * 500
+	local cardsRemaining = #deckOrder * 300
+	local finalScore = waveScore + enemyScore + timeSavedScore + cardsRemaining
+	displayMessage("score: " ..
+		finalScore .. "\n" ..
+		waveScore ..
+		"(wave)\n" ..
+		enemyScore .. "(enemies)\n" ..
+		timeSavedScore .. "(time saved)\n" ..
+		cardsRemaining .. "(cards remain)",
+		9999999999999)
+end
+
 local function onFrame(event)
+	bonusDisplay:update()
 	if gameOver then
+		Runtime:removeEventListener("enterFrame", onFrame)
+		timer.performWithDelay(3000, calculateScore)
+
 		return
 	end
 	if castle.hp <= 0 then
-		displayMessage("You have failed to save the castle", 999999999)
+		displayMessage("You have failed to save the castle", 3000)
 		gameOver = true
 	end
 	local oldGameTimer = gameTimer
 	deltaTime = (system.getTimer() - oldSystemTime) / 1000
 	oldSystemTime = system.getTimer()
-	gameTimer = math.floor(system.getTimer() / 1000)
+	gameTimer = math.floor(system.getTimer() / 1000) + gameTimerOffset
 	if oldGameTimer ~= gameTimer then
 		waveTimer = currentWave * waveSpawnTimer + 5 - gameTimer
 		print(gameTimer)
@@ -591,18 +729,29 @@ local function onFrame(event)
 			elseif currentWave == 20 then
 				spawnWave(currentWave + 4, 1, 3)
 				displayMessage("final wave: spades from the South", 3000)
-			elseif currentWave == 21 then
-				displayMessage("Congratulations! You saved the castle", 10000)
-			elseif currentWave > 21 then
 			else
-				spawnWave(currentWave + 4)
-				displayMessage("wave " .. currentWave, 3000)
+				if currentWave < 20 then
+					spawnWave(currentWave + 4)
+					displayMessage("wave " .. currentWave, 3000)
+				end
 			end
 			currentWaveText.text = "current wave: " .. currentWave
 		end
 	end
+	local enemiesAlive = 0
 	for i = 1, #enemies do
 		enemies[i]:tick()
+		if enemies[i].dead == false then
+			enemiesAlive = enemiesAlive + 1
+		end
+	end
+	if enemiesAlive == 0 and currentWave > 0 then
+		if currentWave >= 20 then
+			displayMessage("Congratulations! You saved the castle", 3000)
+			gameOver = true
+		else
+			gameTimerOffset = gameTimerOffset + waveTimer
+		end
 	end
 	for i = 1, #characters do
 		characters[i]:tick()
