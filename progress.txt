@@ -1,3 +1,10 @@
 //LD55 - summoning
 //--------------
-//made character sprites and got them to spawn on click for testing
+//Game Concept
+//
+// Defeat waves of enemies by placing units
+// Units are placed by drawing cards from a deck and clicking in the game world
+// Card values determines unit strength
+
+-made character sprites and got them to spawn on click for testing
+-drawing and placing of cards
