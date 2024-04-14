@@ -5,7 +5,9 @@
 // Defeat waves of enemies by placing units
 // Units are placed by drawing cards from a deck and clicking in the game world
 // Card values determines unit strength
+// Waves spawn every 30 seconds, 20 waves, 10 minute game
 
 -made character sprites and got them to spawn on click for testing
 -drawing and placing of cards
 -designed unitData
+-need enemies to do movement and attacks, need waves to do enemies
